@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.mjs",
-     "start": "node server.mjs",
+    "dev": "node api/server.mjs",
+     "start": "node api/server.mjs",
     "test": "node --test"
   }
 }
