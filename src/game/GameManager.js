@@ -31,6 +31,11 @@ export class GameManager {
     this.pendingCardUpgrade = null;
     // 遥控骰子卡：等待玩家选点数。
     this.pendingDicePick = null;
+    // 涨价卡 / 怪兽卡 / 查税卡 / 好事成双：等待玩家选目标。
+    this.pendingRentBoost = null;
+    this.pendingDestroy = null;
+    this.pendingAudit = null;
+    this.pendingDuplicate = null;
     this.winner = null;
     this.busy = false;
     this.emit();
@@ -163,7 +168,7 @@ export class GameManager {
     // 休息回合要显示为不可点（灰色）。
     // 但【绝不能】只靠这个禁用推进：玩家回合的唯一推进器就是掷骰，
     // 所以必须同时有 autoSkipIfResting() 自动跳过，否则会死锁在「一直休息」。
-    return this.phase === "playing" && !this.busy && player?.id === "player" && !player.hasRolledThisTurn && !(player.skipTurns > 0) && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingCardUpgrade === null && this.pendingDicePick === null;
+    return this.phase === "playing" && !this.busy && player?.id === "player" && !player.hasRolledThisTurn && !(player.skipTurns > 0) && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingCardUpgrade === null && this.pendingDicePick === null && this.pendingRentBoost === null && this.pendingDestroy === null && this.pendingAudit === null && this.pendingDuplicate === null;
   }
 
   // 给界面用：当前玩家是否正在休息（本回合被跳过）。
@@ -362,6 +367,36 @@ export class GameManager {
         this.emit();
         return true;
       }
+      // 以下四张卡都要玩家选目标，选中前保留 busy，
+      // 由各自的 confirm/cancel（或 resolvePendingDecision 兜底）释放。
+      if (card.type === "rent_boost") {
+        await this.openRentBoost(player, card);
+        if (this.pendingRentBoost !== null) { this.emit(); return true; }
+        this.busy = false;
+        this.emit();
+        return true;
+      }
+      if (card.type === "destroy") {
+        await this.openDestroy(player, card);
+        if (this.pendingDestroy !== null) { this.emit(); return true; }
+        this.busy = false;
+        this.emit();
+        return true;
+      }
+      if (card.type === "audit") {
+        await this.openAudit(player, card);
+        if (this.pendingAudit !== null) { this.emit(); return true; }
+        this.busy = false;
+        this.emit();
+        return true;
+      }
+      if (card.type === "duplicate_card") {
+        await this.openDuplicate(player, card);
+        if (this.pendingDuplicate !== null) { this.emit(); return true; }
+        this.busy = false;
+        this.emit();
+        return true;
+      }
       if (card.type === "move") {
         await this.moveOneStep(player, card.value);
       }
@@ -428,6 +463,246 @@ export class GameManager {
   cancelDicePick() {
     if (this.pendingDicePick === null) return false;
     this.pendingDicePick = null;
+    this.lastEffect = null;
+    this.busy = false;
+    this.emit();
+    this.endTurn();
+    return true;
+  }
+
+  // ===== 涨价卡：指定一块地块，两回合内过路费翻倍 =====
+  async openRentBoost(player, card) {
+    const candidates = this.tiles.filter((tile) => tile.type === "property" && tile.owner);
+    if (player.id !== "player") {
+      const target = candidates[Math.floor(this.random() * candidates.length)];
+      if (target) {
+        target.boostRounds = 2;
+        this.log(`${player.name} 使用涨价卡，让「${target.name}」两回合内过路费翻倍。`);
+      }
+      return true;
+    }
+    if (!candidates.length) {
+      // 场上没有任何已被购买的地块，卡牌不生效，直接退卡。
+      player.cards.push(card);
+      this.log("场上还没有被购买的地块，涨价卡无法使用，已退回手牌。");
+      return true;
+    }
+    this.pendingRentBoost = card.id;
+    this.lastEffect = {
+      playerId: player.id,
+      tileId: player.position,
+      kind: "rent_boost",
+      requiresDecision: true,
+      title: `功能卡 · ${card.name}`,
+      description: card.description,
+      outcome: "选择一块地块，两回合内它的过路费翻倍。"
+    };
+    this.emit();
+    await this.onEffect?.(this.lastEffect);
+    return true;
+  }
+
+  confirmRentBoost(tileId) {
+    if (this.pendingRentBoost === null) return false;
+    const tile = this.tiles.find((item) => item.id === tileId);
+    this.pendingRentBoost = null;
+    if (!tile || tile.type !== "property" || !tile.owner) {
+      this.log("选择的不是可涨价的地块，本次使用未生效。");
+      this.busy = false;
+      this.emit();
+      return false;
+    }
+    tile.boostRounds = 2;
+    this.log(`你使用涨价卡，让「${tile.name}」两回合内过路费翻倍。`);
+    this.busy = false;
+    this.emit();
+    return true;
+  }
+
+  cancelRentBoost() {
+    if (this.pendingRentBoost === null) return false;
+    this.pendingRentBoost = null;
+    this.lastEffect = null;
+    this.busy = false;
+    this.emit();
+    this.endTurn();
+    return true;
+  }
+
+  // ===== 怪兽卡：指定一栋房子，降回 Lv.1 =====
+  async openDestroy(player, card) {
+    const candidates = this.tiles.filter((tile) => tile.type === "property" && tile.owner && tile.level > 1);
+    if (player.id !== "player") {
+      const target = candidates[Math.floor(this.random() * candidates.length)];
+      if (target) {
+        target.level = 1;
+        this.log(`${player.name} 使用怪兽卡，把「${target.name}」铲回了 Lv.1。`);
+      }
+      return true;
+    }
+    if (!candidates.length) {
+      player.cards.push(card);
+      this.log("场上没有 1 级以上的房子，怪兽卡无法使用，已退回手牌。");
+      return true;
+    }
+    this.pendingDestroy = card.id;
+    this.lastEffect = {
+      playerId: player.id,
+      tileId: player.position,
+      kind: "destroy",
+      requiresDecision: true,
+      title: `功能卡 · ${card.name}`,
+      description: card.description,
+      outcome: "选择一栋房子，把它降回 Lv.1。"
+    };
+    this.emit();
+    await this.onEffect?.(this.lastEffect);
+    return true;
+  }
+
+  confirmDestroy(tileId) {
+    if (this.pendingDestroy === null) return false;
+    const tile = this.tiles.find((item) => item.id === tileId);
+    this.pendingDestroy = null;
+    if (!tile || tile.type !== "property" || !tile.owner || tile.level <= 1) {
+      this.log("选择的不是可拆除的房子，本次使用未生效。");
+      this.busy = false;
+      this.emit();
+      return false;
+    }
+    tile.level = 1;
+    this.log(`你使用怪兽卡，把「${tile.name}」铲回了 Lv.1。`);
+    this.busy = false;
+    this.emit();
+    return true;
+  }
+
+  cancelDestroy() {
+    if (this.pendingDestroy === null) return false;
+    this.pendingDestroy = null;
+    this.lastEffect = null;
+    this.busy = false;
+    this.emit();
+    this.endTurn();
+    return true;
+  }
+
+  // ===== 查税卡：指定一个玩家，ta 交给你 10% 现金 =====
+  async openAudit(player, card) {
+    const others = this.players.filter((item) => item.id !== player.id && !item.bankrupt);
+    if (player.id !== "player") {
+      const target = others[Math.floor(this.random() * others.length)];
+      if (target) {
+        const amount = Math.floor(target.money * 0.1);
+        target.money -= amount;
+        player.money += amount;
+        this.log(`${player.name} 使用查税卡，向 ${target.name} 收了 ${amount} 远气。`);
+      }
+      return true;
+    }
+    if (!others.length) {
+      player.cards.push(card);
+      this.log("没有其他在场玩家，查税卡无法使用，已退回手牌。");
+      return true;
+    }
+    this.pendingAudit = card.id;
+    this.lastEffect = {
+      playerId: player.id,
+      tileId: player.position,
+      kind: "audit",
+      requiresDecision: true,
+      title: `功能卡 · ${card.name}`,
+      description: card.description,
+      outcome: "选择一个玩家，ta 会把 10% 现金交给你。"
+    };
+    this.emit();
+    await this.onEffect?.(this.lastEffect);
+    return true;
+  }
+
+  confirmAudit(targetPlayerId) {
+    if (this.pendingAudit === null) return false;
+    const player = this.players.find((item) => item.id === "player");
+    const target = this.players.find((item) => item.id === targetPlayerId);
+    this.pendingAudit = null;
+    if (!player || !target || target.id === player.id || target.bankrupt) {
+      this.log("选择的不是可查税的玩家，本次使用未生效。");
+      this.busy = false;
+      this.emit();
+      return false;
+    }
+    const amount = Math.floor(target.money * 0.1);
+    target.money -= amount;
+    player.money += amount;
+    this.log(`你使用查税卡，向 ${target.name} 收了 ${amount} 远气。`);
+    this.busy = false;
+    this.emit();
+    return true;
+  }
+
+  cancelAudit() {
+    if (this.pendingAudit === null) return false;
+    this.pendingAudit = null;
+    this.lastEffect = null;
+    this.busy = false;
+    this.emit();
+    this.endTurn();
+    return true;
+  }
+
+  // ===== 好事成双：复制一张手牌（原来的仍在） =====
+  async openDuplicate(player, card) {
+    if (player.id !== "player") {
+      const others = player.cards.filter((item) => item.id !== card.id);
+      if (others.length) {
+        const target = others[Math.floor(this.random() * others.length)];
+        player.cards.push(target);
+        this.log(`${player.name} 使用好事成双，复制了一张「${target.name}」。`);
+      }
+      return true;
+    }
+    // 注意：card 已被 useCard 从手牌 splice 掉，此时 player.cards 里只剩其他牌。
+    if (!player.cards.length) {
+      player.cards.push(card);
+      this.log("手上没有其他卡牌可复制，好事成双已退回手牌。");
+      return true;
+    }
+    this.pendingDuplicate = card.id;
+    this.lastEffect = {
+      playerId: player.id,
+      tileId: player.position,
+      kind: "duplicate_card",
+      requiresDecision: true,
+      title: `功能卡 · ${card.name}`,
+      description: card.description,
+      outcome: "选择一张手牌复制，原来的卡牌仍在。"
+    };
+    this.emit();
+    await this.onEffect?.(this.lastEffect);
+    return true;
+  }
+
+  confirmDuplicate(cardIndex) {
+    if (this.pendingDuplicate === null) return false;
+    const player = this.players.find((item) => item.id === "player");
+    this.pendingDuplicate = null;
+    const target = player?.cards[Number(cardIndex)];
+    if (!player || !target) {
+      this.log("选择的不是可复制的卡牌，本次使用未生效。");
+      this.busy = false;
+      this.emit();
+      return false;
+    }
+    player.cards.push(target);
+    this.log(`你使用好事成双，复制了一张「${target.name}」。`);
+    this.busy = false;
+    this.emit();
+    return true;
+  }
+
+  cancelDuplicate() {
+    if (this.pendingDuplicate === null) return false;
+    this.pendingDuplicate = null;
     this.lastEffect = null;
     this.busy = false;
     this.emit();
@@ -510,11 +785,15 @@ export class GameManager {
   // 清掉悬空的待决策状态并推进回合，避免摇骰按钮永久禁用。
   resolvePendingDecision() {
     if (this.phase !== "playing") return false;
-    if (this.pendingCardUpgrade === null && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingDicePick === null) return false;
+    if (this.pendingCardUpgrade === null && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingDicePick === null && this.pendingRentBoost === null && this.pendingDestroy === null && this.pendingAudit === null && this.pendingDuplicate === null) return false;
     this.pendingCardUpgrade = null;
     this.pendingPurchase = null;
     this.pendingUpgrade = null;
     this.pendingDicePick = null;
+    this.pendingRentBoost = null;
+    this.pendingDestroy = null;
+    this.pendingAudit = null;
+    this.pendingDuplicate = null;
     this.lastEffect = null;
     this.busy = false;
     this.emit();
@@ -713,6 +992,21 @@ export class GameManager {
       }
     }
     if (!description) description = event.description;
+    // 幸运鸟：下一次随机事件的奖励翻倍（只对正向收益生效，用完即消耗）。
+    const isGain = (event.type === "money" && event.value > 0) || event.type === "reward";
+    if (player.luckyNext) {
+      if (isGain) {
+        if (event.type === "money") {
+          const extra = Math.max(0, Math.round(event.value * (1 + modifier)));
+          player.money += extra;
+          description = `幸运鸟生效，奖励翻倍，共获得 ${Math.abs(event.value * (1 + modifier))} 远气。`;
+        } else {
+          description = `${description}（幸运鸟生效）`;
+        }
+        player.luckyNext = false;
+        this.log(`${player.name} 的幸运鸟生效，本次事件奖励翻倍。`);
+      }
+    }
     const cardNote = awardedCard
       ? `\n获得功能卡「${awardedCard.name}」：${awardedCard.description}${cardExtra ? "\n（能力触发，额外获得一张同名卡）" : ""}`
       : "";
@@ -817,6 +1111,15 @@ export class GameManager {
     }
     this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
     if (this.currentPlayerIndex === 0) this.round += 1;
+    this.players.forEach((player) => {
+      if (player.id !== "player") return;
+      player.boostedTiles = player.boostedTiles.filter((id) => {
+        const tile = this.tiles.find((item) => item.id === id);
+        if (!tile) return false;
+        tile.boostRounds -= 1;
+        return tile.boostRounds > 0;
+      });
+    });
     this.currentPlayer.hasRolledThisTurn = false;
     this.currentPlayer.cardLockedThisTurn = false;
     this.emit();

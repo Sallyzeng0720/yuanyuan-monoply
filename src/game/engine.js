@@ -12,7 +12,9 @@ function createAbilityState(character) {
 export function calculateRent(tile, owner, visitor, cardRentBonus = 0) {
   if (!owner || owner.id === visitor.id) return 0;
   const levelMultiplier = 1 + (tile.level - 1) * 0.55;
-  const raw = tile.baseRent * levelMultiplier * (1 + cardRentBonus);
+  // 涨价卡：被指定的地块两回合内过路费翻倍。
+  const boostMultiplier = tile.boostRounds > 0 ? 2 : 1;
+  const raw = tile.baseRent * levelMultiplier * (1 + cardRentBonus) * boostMultiplier;
   return Math.max(0, Math.round(raw * (1 - (visitor.character.stats.defenseBonus || 0))));
 }
 
@@ -37,7 +39,7 @@ export function chooseAiAction(ai, tile, random = Math.random) {
 }
 
 export function createTiles(config) {
-  return config.map((tile) => ({ ...tile, level: tile.type === "property" ? 1 : 0, owner: null }));
+  return config.map((tile) => ({ ...tile, level: tile.type === "property" ? 1 : 0, owner: null, boostRounds: 0 }));
 }
 
 export function createPlayers(characters) {
@@ -61,6 +63,8 @@ export function createPlayers(characters) {
     luckyNext: false,
     // 遥控骰子卡选定的点数：下次掷骰强制使用，掷完清空。
     forcedRoll: null,
+    // 涨价卡：本玩家名下被指定涨价的地块 id（有效期两回合）。
+    boostedTiles: [],
     personality: index === 0 ? "player" : personalities[index - 1],
     bankrupt: false
   }));

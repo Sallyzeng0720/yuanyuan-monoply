@@ -153,6 +153,88 @@ test("遥控骰子卡可以指定下一次掷骰的点数", async () => {
   assert.equal(player.forcedRoll, null, "用过后应清空");
 });
 
+test("涨价卡指定的地块两回合内过路费翻倍", async () => {
+  const game = new GameManager({ moveDelay: 0, rollAnimationSteps: 0, rollAnimationDelay: 0, onEffect: async () => undefined });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const tile = game.tiles.find((item) => item.type === "property");
+  tile.owner = "ai_1";
+  game.players.find((p) => p.id === "ai_1").properties.push(tile.id);
+  const boostCard = cards.find((card) => card.id === "spotlight");
+
+  player.cards.push(boostCard);
+  assert.equal(await game.useCard("player", player.cards.length - 1), true);
+  assert.equal(game.pendingRentBoost, "spotlight");
+  assert.equal(tile.boostRounds, 0);
+
+  assert.equal(game.confirmRentBoost(tile.id), true);
+  assert.equal(tile.boostRounds, 2);
+  assert.equal(game.busy, false);
+});
+
+test("怪兽卡把指定房子降回 Lv.1", async () => {
+  const game = new GameManager({ moveDelay: 0, rollAnimationSteps: 0, rollAnimationDelay: 0, onEffect: async () => undefined });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const tile = game.tiles.find((item) => item.type === "property");
+  tile.owner = "ai_1";
+  tile.level = 3;
+  const card = cards.find((c) => c.id === "monsters");
+
+  player.cards.push(card);
+  assert.equal(await game.useCard("player", player.cards.length - 1), true);
+  assert.equal(game.pendingDestroy, "monsters");
+
+  assert.equal(game.confirmDestroy(tile.id), true);
+  assert.equal(tile.level, 1, "应降回 Lv.1");
+  assert.equal(tile.owner, "ai_1", "房子仍然属于原主人，只是等级归 1");
+  assert.equal(game.busy, false);
+});
+
+test("查税卡让指定玩家交出 10% 现金", async () => {
+  const game = new GameManager({ moveDelay: 0, rollAnimationSteps: 0, rollAnimationDelay: 0, onEffect: async () => undefined });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const target = game.players.find((p) => p.id === "ai_1");
+  target.money = 1000;
+  const before = player.money;
+  const card = cards.find((c) => c.id === "audit");
+
+  player.cards.push(card);
+  assert.equal(await game.useCard("player", player.cards.length - 1), true);
+  assert.equal(game.pendingAudit, "audit");
+
+  assert.equal(game.confirmAudit("ai_1"), true);
+  assert.equal(target.money, 900, "target 应被扣掉 10%");
+  assert.equal(player.money, before + 100, "player 应收到 100");
+  assert.equal(game.busy, false);
+});
+
+test("好事成双复制一张手牌且原牌仍在", async () => {
+  const game = new GameManager({ moveDelay: 0, rollAnimationSteps: 0, rollAnimationDelay: 0, onEffect: async () => undefined });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const copyCard = cards.find((c) => c.id === "good_luck");
+  const ticket = cards.find((c) => c.id === "ticket");
+  player.cards.push(ticket);
+  player.cards.push(copyCard);
+
+  // good_luck 是第 1 张（最后推进去的），用它的索引出牌。
+  const copyIndex = player.cards.length - 1;
+  assert.equal(await game.useCard("player", copyIndex), true);
+  assert.equal(game.pendingDuplicate, "good_luck");
+
+  // 出牌后 good_luck 已被移除，手牌索引 0 就是那张 ticket。
+  assert.equal(game.confirmDuplicate(0), true);
+  assert.equal(player.cards.length, 2, "应复制出一张 ticket，加上原本那张共 2 张");
+  assert.equal(player.cards.filter((c) => c.id === "ticket").length, 2, "应有两张 ticket");
+  assert.equal(game.busy, false);
+});
+
 test("遥控骰子卡可以取消，取消后不残留 busy", async () => {
   const game = new GameManager({
     moveDelay: 0,

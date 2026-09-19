@@ -38,7 +38,7 @@ function stuckReason(game) {
   if (game.phase !== "playing") return null;
   const player = game.currentPlayer;
   if (!player) return "没有当前玩家";
-  const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
+  const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null || game.pendingRentBoost !== null || game.pendingDestroy !== null || game.pendingAudit !== null || game.pendingDuplicate !== null;
   if (game.busy) return pending ? null : `busy 卡住且无待决策（cur=${player.id}）`;
   // 休息回合：本回合被跳过，掷骰本就无效，属正常状态。
   if (player.skipTurns > 0) return null;
@@ -61,8 +61,10 @@ test("全量扫描：每张卡牌出牌后都不会卡死或抛异常", async ()
     // 移动卡（机票卡）走完后会落在新格子上，可能弹出购买/升级决策，
     // 也可能落到事件格；这两种都算「有后续」，不算卡死。
     // 休息卡会让玩家 skipTurns=1（本回合跳过），此时本就该禁用摇骰。
-    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
-    if (game.phase === "playing" && !pending) {
+    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null || game.pendingRentBoost !== null || game.pendingDestroy !== null || game.pendingAudit !== null || game.pendingDuplicate !== null;
+    // 需要选目标的卡：选之前 busy 保留是正常等待，不算卡死。
+    const pickerCards = new Set(["upgrade_tile", "dice_pick", "rent_boost", "destroy", "audit", "duplicate_card"]);
+    if (game.phase === "playing" && !pending && !pickerCards.has(card.type)) {
       assert.equal(game.busy, false, `卡牌「${card.name}」出牌后 busy 未释放`);
       assert.equal(player.cards.length, 0, `卡牌「${card.name}」出牌后未从手牌移除`);
       assert.equal(
@@ -71,7 +73,14 @@ test("全量扫描：每张卡牌出牌后都不会卡死或抛异常", async ()
         `卡牌「${card.name}」出牌后玩家既不能摇骰也没有休息标记`
       );
     }
-    assert.equal(stuckReason(game), null, `卡牌「${card.name}」出牌后卡死`);
+    // 无论哪种卡，都不能处于「既不能摇骰、又无待决策、又没掷骰」的死寂状态。
+    if (!pending) {
+      assert.equal(stuckReason(game), null, `卡牌「${card.name}」出牌后卡死`);
+    }
+    // 需要选目标的卡：等待期间必须保留 busy，否则会重复操作。
+    if (pickerCards.has(card.type)) {
+      assert.ok(pending || game.busy === false, `卡牌「${card.name}」等待选目标时应保留 busy 或有待决策`);
+    }
   }
 });
 
@@ -201,7 +210,7 @@ test("全量扫描：连续推进多个回合不会卡死，且数值始终合�
     const ready = await waitForPlayerTurn();
     if (!ready) break;
 
-    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
+    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null || game.pendingRentBoost !== null || game.pendingDestroy !== null || game.pendingAudit !== null || game.pendingDuplicate !== null;
     if (pending) {
       game.resolvePendingDecision();
     } else {
@@ -233,7 +242,7 @@ test("全量扫描：卡牌与事件没有声明了却未实现的类型", () =>
     );
   }
 
-  const implementedCardTypes = new Set(["move", "shield", "income", "upgrade_tile", "luck", "rest", "money", "destroy", "dice_pick"]);
+  const implementedCardTypes = new Set(["move", "shield", "income", "upgrade_tile", "luck", "rest", "money", "destroy", "dice_pick", "rent_boost", "audit", "duplicate_card"]);
   for (const card of cards) {
     assert.ok(
       implementedCardTypes.has(card.type),
