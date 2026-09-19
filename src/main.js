@@ -26,7 +26,10 @@ game = new GameManager({
     if (game) render();
   },
   onEffect: (effect) => {
-    const isPopupEffect = effect && ["event", "card", "reward", "rest", "teleport", "rent", "skill", "purchase", "upgrade", "decision", "immunity"].includes(effect.kind);
+    // card_target（鸟蛋卡选地块）必须包含在内，否则会被下方的
+    // requiresDecision 拦截分支直接 resolve 掉，弹窗永不显示、
+    // pendingCardUpgrade 无人可清，busy 永远为 true 导致整局卡死。
+    const isPopupEffect = effect && ["event", "card", "reward", "rest", "teleport", "rent", "skill", "purchase", "upgrade", "decision", "immunity", "card_target"].includes(effect.kind);
     if (effect?.requiresDecision && !isPopupEffect) {
       closeEffectModal();
       render();

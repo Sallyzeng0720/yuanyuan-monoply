@@ -419,8 +419,12 @@ export class GameManager {
     try {
       if (!player || !this.upgradeTileByCard(player, tileId)) {
         // 选中的地块不可升级：不要卡死，清掉待决策并结束回合并给出提示。
+        // 注意：进入本函数时已 this.busy = true，失败分支若不释放，
+        // canCurrentPlayerRoll() 会因 !this.busy 恒为 false 而永久禁用摇骰。
         this.pendingCardUpgrade = null;
+        this.lastEffect = { playerId: player?.id, tileId: null, kind: "upgrade", title: "升级未生效", description: "选择的不是可升级的地块。" };
         this.log("选择的不是可升级的地块，本次使用未生效。");
+        this.busy = false;
         this.emit();
         this.endTurn();
         return false;
