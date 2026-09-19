@@ -59,6 +59,8 @@ export function createPlayers(characters) {
     shield: false,
     rentBoost: 0,
     luckyNext: false,
+    // 遥控骰子卡选定的点数：下次掷骰强制使用，掷完清空。
+    forcedRoll: null,
     personality: index === 0 ? "player" : personalities[index - 1],
     bankrupt: false
   }));

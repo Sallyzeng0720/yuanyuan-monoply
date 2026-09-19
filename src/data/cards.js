@@ -8,7 +8,7 @@ export const cards = [
   { id: "spotlight", name: "涨价卡", description: "对指定地段的所有房屋涨价两回合", category: "neutral", type: "money", icon: "☀", value: 180 },
   { id: "cheer", name: "应援补给", description: "使用后增加一次掷骰子机会。", category: "positive", type: "money", icon: "♥", value: 260 },
   { id: "good_luck", name: "好事成双", description: "可选择一张当前已有的卡牌复制", category: "positive", type: "luck", icon: "✧" },
-  { id: "move_anywhere", name: "遥控骰子", description: "使用后可自定义骰子点数", category: "positive", type: "luck", icon: "✧" },
+  { id: "move_anywhere", name: "遥控骰子", description: "使用后指定下一次掷出的骰子点数（1-6）。", category: "positive", type: "dice_pick", icon: "✧" },
   { id: "monsters", name: "怪兽卡", description: "你和主办吵架，前面这栋房子太碍事了，挡住了舞台视野，恰巧市长路过，决定铲除这栋房子变成空地。", category: "negative", type: "destroy", icon: "✧" },
   { id: "audit", name: "查税卡", description: "和小鸟一起唱鸭梨大，这一次你买单！随机指定一个人获得其10%现金", category: "neutral", type: "luck", icon: "☼" },
 ];

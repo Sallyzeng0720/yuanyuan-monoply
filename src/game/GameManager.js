@@ -29,6 +29,8 @@ export class GameManager {
     this.pendingPurchase = null;
     this.pendingUpgrade = null;
     this.pendingCardUpgrade = null;
+    // 遥控骰子卡：等待玩家选点数。
+    this.pendingDicePick = null;
     this.winner = null;
     this.busy = false;
     this.emit();
@@ -104,7 +106,8 @@ export class GameManager {
       this.emit();
       await new Promise((resolve) => setTimeout(resolve, this.rollAnimationDelay));
     }
-    const roll = 1 + Math.floor(this.random() * 6);
+    const roll = player.forcedRoll != null ? player.forcedRoll : 1 + Math.floor(this.random() * 6);
+    player.forcedRoll = null;
     this.lastRoll = roll;
     player.lastRoll = roll;
     this.diceRolling = false;
@@ -160,7 +163,7 @@ export class GameManager {
     // 休息回合要显示为不可点（灰色）。
     // 但【绝不能】只靠这个禁用推进：玩家回合的唯一推进器就是掷骰，
     // 所以必须同时有 autoSkipIfResting() 自动跳过，否则会死锁在「一直休息」。
-    return this.phase === "playing" && !this.busy && player?.id === "player" && !player.hasRolledThisTurn && !(player.skipTurns > 0) && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingCardUpgrade === null;
+    return this.phase === "playing" && !this.busy && player?.id === "player" && !player.hasRolledThisTurn && !(player.skipTurns > 0) && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingCardUpgrade === null && this.pendingDicePick === null;
   }
 
   // 给界面用：当前玩家是否正在休息（本回合被跳过）。
@@ -336,6 +339,17 @@ export class GameManager {
       if (card.type === "rest") {
         if (!(await this.consumeImmunity(player))) player.skipTurns = 1;
       }
+      if (card.type === "dice_pick") {
+        await this.openDicePick(player, card);
+        // 玩家选完点数前保留 busy；由 confirmDicePick / cancelDicePick / resolvePendingDecision 释放。
+        if (this.pendingDicePick !== null) {
+          this.emit();
+          return true;
+        }
+        this.busy = false;
+        this.emit();
+        return true;
+      }
       if (card.type === "upgrade_tile") {
         await this.openCardUpgrade(player, card);
         // 玩家出鸟蛋卡后弹窗等选地块，此处保留 busy；
@@ -375,6 +389,50 @@ export class GameManager {
     if (skillId === "defense") return this.downgradeCurrentBuilding(player);
     if (skillId === "upgrade") return this.swapWithPlayer(player, targetPlayerId);
     return false;
+  }
+
+  async openDicePick(player, card) {
+    if (player.id !== "player") {
+      // AI 直接随机指定一个点数，无需弹窗。
+      player.forcedRoll = 1 + Math.floor(this.random() * 6);
+      this.log(`${player.name} 使用「${card.name}」指定了点数。`);
+      return true;
+    }
+    this.pendingDicePick = card.id;
+    this.lastEffect = {
+      playerId: player.id,
+      tileId: player.position,
+      kind: "dice_pick",
+      requiresDecision: true,
+      title: `功能卡 · ${card.name}`,
+      description: card.description,
+      outcome: "选择下一次掷骰的点数（1-6）。"
+    };
+    this.emit();
+    await this.onEffect?.(this.lastEffect);
+    return true;
+  }
+
+  confirmDicePick(value) {
+    if (this.pendingDicePick === null) return false;
+    const player = this.players.find((item) => item.id === "player");
+    const roll = Math.min(6, Math.max(1, Math.round(Number(value))));
+    this.pendingDicePick = null;
+    if (player) player.forcedRoll = roll;
+    this.log(`你使用遥控骰子，指定下一次掷出 ${roll} 点。`);
+    this.busy = false;
+    this.emit();
+    return true;
+  }
+
+  cancelDicePick() {
+    if (this.pendingDicePick === null) return false;
+    this.pendingDicePick = null;
+    this.lastEffect = null;
+    this.busy = false;
+    this.emit();
+    this.endTurn();
+    return true;
   }
 
   async openCardUpgrade(player, card) {
@@ -452,10 +510,11 @@ export class GameManager {
   // 清掉悬空的待决策状态并推进回合，避免摇骰按钮永久禁用。
   resolvePendingDecision() {
     if (this.phase !== "playing") return false;
-    if (this.pendingCardUpgrade === null && this.pendingPurchase === null && this.pendingUpgrade === null) return false;
+    if (this.pendingCardUpgrade === null && this.pendingPurchase === null && this.pendingUpgrade === null && this.pendingDicePick === null) return false;
     this.pendingCardUpgrade = null;
     this.pendingPurchase = null;
     this.pendingUpgrade = null;
+    this.pendingDicePick = null;
     this.lastEffect = null;
     this.busy = false;
     this.emit();

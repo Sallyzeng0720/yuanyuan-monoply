@@ -38,7 +38,7 @@ function stuckReason(game) {
   if (game.phase !== "playing") return null;
   const player = game.currentPlayer;
   if (!player) return "没有当前玩家";
-  const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null;
+  const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
   if (game.busy) return pending ? null : `busy 卡住且无待决策（cur=${player.id}）`;
   // 休息回合：本回合被跳过，掷骰本就无效，属正常状态。
   if (player.skipTurns > 0) return null;
@@ -61,7 +61,7 @@ test("全量扫描：每张卡牌出牌后都不会卡死或抛异常", async ()
     // 移动卡（机票卡）走完后会落在新格子上，可能弹出购买/升级决策，
     // 也可能落到事件格；这两种都算「有后续」，不算卡死。
     // 休息卡会让玩家 skipTurns=1（本回合跳过），此时本就该禁用摇骰。
-    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null;
+    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
     if (game.phase === "playing" && !pending) {
       assert.equal(game.busy, false, `卡牌「${card.name}」出牌后 busy 未释放`);
       assert.equal(player.cards.length, 0, `卡牌「${card.name}」出牌后未从手牌移除`);
@@ -201,7 +201,7 @@ test("全量扫描：连续推进多个回合不会卡死，且数值始终合�
     const ready = await waitForPlayerTurn();
     if (!ready) break;
 
-    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null;
+    const pending = game.pendingPurchase !== null || game.pendingUpgrade !== null || game.pendingCardUpgrade !== null || game.pendingDicePick !== null;
     if (pending) {
       game.resolvePendingDecision();
     } else {
@@ -233,7 +233,7 @@ test("全量扫描：卡牌与事件没有声明了却未实现的类型", () =>
     );
   }
 
-  const implementedCardTypes = new Set(["move", "shield", "income", "upgrade_tile", "luck", "rest", "money", "destroy"]);
+  const implementedCardTypes = new Set(["move", "shield", "income", "upgrade_tile", "luck", "rest", "money", "destroy", "dice_pick"]);
   for (const card of cards) {
     assert.ok(
       implementedCardTypes.has(card.type),

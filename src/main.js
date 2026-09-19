@@ -29,7 +29,7 @@ game = new GameManager({
     // card_target（鸟蛋卡选地块）必须包含在内，否则会被下方的
     // requiresDecision 拦截分支直接 resolve 掉，弹窗永不显示、
     // pendingCardUpgrade 无人可清，busy 永远为 true 导致整局卡死。
-    const isPopupEffect = effect && ["event", "card", "reward", "rest", "teleport", "rent", "skill", "purchase", "upgrade", "decision", "immunity", "card_target"].includes(effect.kind);
+    const isPopupEffect = effect && ["event", "card", "reward", "rest", "teleport", "rent", "skill", "purchase", "upgrade", "decision", "immunity", "card_target", "dice_pick"].includes(effect.kind);
     if (effect?.requiresDecision && !isPopupEffect) {
       closeEffectModal();
       render();
@@ -385,6 +385,14 @@ function bindEffectModalActions(root) {
     closeEffectModal();
     await game.confirmCardUpgrade(Number(button.dataset.cardUpgrade));
   }));
+  root.querySelectorAll("[data-dice-pick]").forEach((button) => button.addEventListener("click", () => {
+    closeEffectModal();
+    game.confirmDicePick(Number(button.dataset.dicePick));
+  }));
+  root.querySelector("#cancel-dice-pick")?.addEventListener("click", () => {
+    closeEffectModal();
+    game.cancelDicePick();
+  });
   root.querySelector("#cancel-card-upgrade")?.addEventListener("click", async () => {
     closeEffectModal();
     await game.cancelCardUpgrade();
@@ -473,10 +481,12 @@ function effectModalMarkup(effect) {
             ? "天赋选择"
             : effect.kind === "card_target"
               ? "选择地块"
+              : effect.kind === "dice_pick"
+              ? "指定点数"
               : effect.kind === "decision"
               ? (effect.title === "升级地块" ? "升级选择" : "购买选择")
               : "TURN RESULT";
-  const modalClass = isEvent ? `event-modal deck-${effect.deck || "card"}` : isDecision || effect.kind === "card_target" ? "event-modal decision-modal" : "";
+  const modalClass = isEvent ? `event-modal deck-${effect.deck || "card"}` : isDecision || effect.kind === "card_target" || effect.kind === "dice_pick" ? "event-modal decision-modal" : "";
   let decisionActions = "";
   if (effect.kind === "immunity") {
     decisionActions = `<div class="effect-actions"><button class="primary-button" id="immunity-confirm">${effect.confirmLabel || "使用免疫"}</button><button class="text-button" id="immunity-cancel">${effect.cancelLabel || "硬吃伤害"}</button></div>`;
@@ -492,13 +502,15 @@ function effectModalMarkup(effect) {
         ? `<div class="effect-actions"><button class="primary-button" id="buy-current">购买地块</button><button class="text-button" id="pass-purchase">放弃</button></div>`
         : `<div class="effect-actions"><button class="text-button" id="pass-purchase">远气不足，放弃购买</button></div>`;
     }
+  } else if (effect.kind === "dice_pick") {
+    decisionActions = `<div class="tile-picker dice-picker">${[1, 2, 3, 4, 5, 6].map((value) => `<button class="tile-target dice-target" data-dice-pick="${value}"><b>${value}</b><small>${value} 点</small></button>`).join("")}</div><div class="effect-actions"><button class="text-button" id="cancel-dice-pick">取消使用</button></div>`;
   } else if (effect.kind === "card_target") {
     const candidates = state.tiles.filter((tile) => tile.type === "property" && tile.level < 4);
     decisionActions = candidates.length
       ? `<div class="tile-picker">${candidates.map((tile) => `<button class="tile-target" data-card-upgrade="${tile.id}"><b>${tile.name}</b><small>Lv.${tile.level} → Lv.${tile.level + 1}</small></button>`).join("")}</div><div class="effect-actions"><button class="text-button" id="cancel-card-upgrade">取消使用</button></div>`
       : `<div class="effect-actions"><button class="text-button" id="cancel-card-upgrade">没有可升级的地块</button></div>`;
   }
-  const countdown = isDecision || effect.kind === "card_target"
+  const countdown = isDecision || effect.kind === "card_target" || effect.kind === "dice_pick"
     ? ""
     : `<div class="modal-countdown">${effect.secondsLeft ?? Math.ceil(MODAL_AUTO_CLOSE_MS / 1000)} 秒后自动关闭（点空白处可立即关闭）</div>`;
   const detail = effect.description || "效果已触发。";
@@ -511,7 +523,7 @@ function effectModalMarkup(effect) {
   const actorName = player && player.name !== player.character.name
     ? `${player.name} · ${player.character.name}`
     : player?.character.name || "";
-  const spark = isEvent || !(isDecision || effect.kind === "card_target")
+  const spark = isEvent || !(isDecision || effect.kind === "card_target" || effect.kind === "dice_pick")
     ? (actorName
       ? `<div class="modal-actor">${avatarMarkup(player.character, "modal-actor-avatar", "sprite")}<span>${actorName}</span></div>`
       : `<div class="modal-spark">${isEvent ? "✦" : "✓"}</div>`)

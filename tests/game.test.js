@@ -125,6 +125,56 @@ test("鸟蛋卡会把指定地块升一级", async () => {
   assert.equal(game.pendingCardUpgrade, null);
 });
 
+test("遥控骰子卡可以指定下一次掷骰的点数", async () => {
+  const game = new GameManager({
+    moveDelay: 0,
+    rollAnimationSteps: 0,
+    rollAnimationDelay: 0,
+    onEffect: async () => undefined
+  });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const diceCard = cards.find((card) => card.id === "move_anywhere");
+
+  player.cards.push(diceCard);
+  assert.equal(await game.useCard("player", player.cards.length - 1), true);
+  assert.equal(game.pendingDicePick, "move_anywhere");
+  assert.equal(game.busy, true, "等玩家选点数时 busy 应保留");
+
+  assert.equal(game.confirmDicePick(6), true);
+  assert.equal(game.pendingDicePick, null);
+  assert.equal(player.forcedRoll, 6);
+  assert.equal(game.busy, false, "选完点数后 busy 必须释放");
+  assert.equal(game.canCurrentPlayerRoll(), true, "选完点数后应能正常摇骰");
+
+  await game.takeTurn(player);
+  assert.equal(player.lastRoll, 6, "下次掷骰应强制使用指定点数");
+  assert.equal(player.forcedRoll, null, "用过后应清空");
+});
+
+test("遥控骰子卡可以取消，取消后不残留 busy", async () => {
+  const game = new GameManager({
+    moveDelay: 0,
+    rollAnimationSteps: 0,
+    rollAnimationDelay: 0,
+    onEffect: async () => undefined
+  });
+  game.setCharacters(characters);
+  game.start("character_01");
+  const player = game.players[0];
+  const diceCard = cards.find((card) => card.id === "move_anywhere");
+
+  player.cards.push(diceCard);
+  await game.useCard("player", player.cards.length - 1);
+  assert.equal(game.pendingDicePick, "move_anywhere");
+
+  assert.equal(game.cancelDicePick(), true);
+  assert.equal(game.pendingDicePick, null);
+  assert.equal(game.busy, false);
+  assert.equal(player.forcedRoll, null, "取消不应设置点数");
+});
+
 test("鸟蛋卡不能把地块升到4级以上", () => {
   const game = new GameManager({ moveDelay: 0, rollAnimationSteps: 0, rollAnimationDelay: 0 });
   game.setCharacters(characters);
